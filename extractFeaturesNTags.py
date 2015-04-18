@@ -44,6 +44,7 @@ class extractFeaturesNTags(object):
         self.dic_ucCartNotBuy = {}
 
         self.dic_allfeatures = {}
+        self.dic_nomalfeatures = {}
 
         ## temp dict of counting
         self.dic_ub = {}   # user buy {uid:[iid,iid,...]}
@@ -276,7 +277,25 @@ class extractFeaturesNTags(object):
                 
                 self.uiucCombine(self.dic_uiBehaviorCount, self.dic_uiCartNotBuy, k, k[0], k[1])
                 self.uiucCombine(self.dic_ucBehaviorCount, self.dic_ucCartNotBuy, k, k[0], self.dic_item[k[1]][0])
-    
+
+
+    ## nomalize
+    def nomalize(self):
+        for (k, v) in self.dic_allfeatures.items():
+            maxList = [0] * len(v)
+            break
+
+        for (k, v) in self.dic_allfeatures.items():
+            for i in range(len(v)):
+                if float(v[i]) > maxList[i]:
+                    maxList[i] = float(v[i])
+        print maxList
+
+        for (k, v) in self.dic_allfeatures.items():
+            self.dic_nomalfeatures[k] = []
+            for i in range(len(v)):
+                self.dic_nomalfeatures[k].append(float(v[i]) / maxList[i])
+
     def writeFeatureFile(self):
         if self.tag_date != self.pre_date:
             flag = 'train'
@@ -285,24 +304,32 @@ class extractFeaturesNTags(object):
         if not os.path.isdir(self.output_dir + flag + os.sep):
             os.mkdir(self.output_dir + flag + os.sep)
         featureWriter = csv.writer(file(self.output_dir + flag + os.sep + self.tag_date + '.csv', 'wb'))
-        for (k, v) in self.dic_allfeatures.items():
+        for (k, v) in self.dic_nomalfeatures.items():
             if flag == 'train':
                 line = [self.dic_train[k]]
             else:
                 line = []
             line.extend(k)
-            line.extend(self.dic_allfeatures[k])
+            line.extend(self.dic_nomalfeatures[k])
             featureWriter.writerow(line)
+
+
+    ## run all functions
+    def _prepareFeatures(self):
+        self.getItemDict()
+        self.firstReader()
+        self.secondReader()
+        if self.tag_date != self.pre_date:
+            self.lastDayReader()
+            self.combineFeatures(self.dic_train)
+        else:
+            self.combineFeatures(self.dic_pre)
+        self.nomalize()
+        self.writeFeatureFile()
 
 # test
 a = extractFeaturesNTags('ori_data/', 'split_data/', 'features/', '2014-12-18', '2014-12-19', 3)
-a.getItemDict()
-a.firstReader()
-a.secondReader()
-if a.tag_date != a.pre_date:
-    a.lastDayReader()
-a.combineFeatures(a.dic_train)
-a.writeFeatureFile()
+a._prepareFeatures()
 print len(a.dic_uBehaviorCount)
 print len(a.dic_uRebuyRate)
 print len(a.dic_uTransferRate)
