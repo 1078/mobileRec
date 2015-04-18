@@ -43,6 +43,8 @@ class extractFeaturesNTags(object):
         self.dic_uiCartNotBuy = {}   # {(uid,iid):[1,1,1]}
         self.dic_ucCartNotBuy = {}
 
+        self.dic_allfeatures = {}
+
         ## temp dict of counting
         self.dic_ub = {}   # user buy {uid:[iid,iid,...]}
         self.dic_urb = {}   # user rebuy
@@ -55,7 +57,12 @@ class extractFeaturesNTags(object):
         self.dic_it_temp = {}
         self.dic_ct_temp = {}
 
+        ## u-i couple dict
+        self.dic_train = {}   # {(uid,iid):1 or 0}
+        self.dic_pre = {}
 
+
+    
     def getItemDict(self):
         '''Load the item file into a dict'''
         item_reader = csv.reader(file(self.ori_dir + 'tianchi_mobile_recommend_train_item.csv', 'r'))
@@ -182,6 +189,24 @@ class extractFeaturesNTags(object):
                 self.dic_ucCartNotBuy[(userid, catid)] = [0,0,0]
             self.dic_ucCartNotBuy[(userid, catid)][day] = 1
             
+    
+    ## extract tag data
+    def extractTrainUi(self, userid, itemid, behavior):
+        if itemid in self.dic_item:
+            if (userid, itemid) not in self.dic_train:
+                if behavior == '4':
+                    self.dic_train[(userid, itemid)] = 1
+                else:
+                    self.dic_train[(userid, itemid)] = 0
+            else:
+                if behavior == '4':
+                    self.dic_train[(userid, itemid)] = 1
+
+    def extractPreUi(self, userid, itemid, behavior):
+        if itemid in self.dic_item:
+            if (userid, itemid) not in self.dic_pre:
+                self.dic_pre[(userid, itemid)] = ''
+         
 
     def firstReader(self):
         csv_feature_reader_list = self.windowReader._readFeatureSet()
@@ -197,6 +222,8 @@ class extractFeaturesNTags(object):
                 self.uicBehaviorCount(userid, itemid, catid, behavior, day)
                 self.uicRebuyCount(userid, itemid, catid, behavior)
                 self.uiucBehaviorCount(userid, itemid, catid, behavior)
+                if self.tag_date == self.pre_date:
+                    self.extractPreUi(userid, itemid, behavior)
         self.uicRebuyRate()
         self.uicTransferCount()
         self.uicTransferRate()
@@ -207,13 +234,82 @@ class extractFeaturesNTags(object):
             for line in csv_list[day]:
                 self.uiucCartNotBuy(line[0], line[1], line[4], day, line[2])
 
+    def lastDayReader(self):
+        csv_last_reader = self.windowReader._readTagSet()
+        for line in csv_last_reader:
+            self.extractTrainUi(line[0], line[1], line[2])
+
+    ## combine features
+    def uicCombine(self, dic_behaviorCount, dic_rebuyRate, dic_transferRate, key, uikey):
+        for i in range(3):
+            self.dic_allfeatures[uikey].extend(dic_behaviorCount[key][i])
+
+        if key in dic_rebuyRate:
+            self.dic_allfeatures[uikey].append(dic_rebuyRate[key])
+        else:
+            self.dic_allfeatures[uikey].append(0)
+
+        if key in dic_transferRate:
+            self.dic_allfeatures[uikey].extend(dic_transferRate[key])
+        else:
+            self.dic_allfeatures[uikey].extend([0,0,0])
+
+    def uiucCombine(self, dic_behaviorCount, dic_cartNotBuy, k, key1, key2):
+        if (key1, key2) in dic_behaviorCount:
+            self.dic_allfeatures[k].extend(dic_behaviorCount[(key1, key2)])
+        else:
+            self.dic_allfeatures[k].extend([0,0,0,0])
+
+        if (key1, key2) in dic_cartNotBuy:
+            self.dic_allfeatures[k].extend(dic_cartNotBuy[(key1, key2)])
+        else:
+            self.dic_allfeatures[k].extend([0,0,0])
+
+    def combineFeatures(self, dic_UI):
+        for (k, v) in dic_UI.items():
+            if k[0] in self.dic_uBehaviorCount and k[1] in self.dic_iBehaviorCount:    # the user and item should appear before the tag or pre day
+                self.dic_allfeatures[k] = []
+                
+                self.uicCombine(self.dic_uBehaviorCount, self.dic_uRebuyRate, self.dic_uTransferRate, k[0], k)
+                self.uicCombine(self.dic_iBehaviorCount, self.dic_iRebuyRate, self.dic_iTransferRate, k[1], k)
+                self.uicCombine(self.dic_cBehaviorCount, self.dic_cRebuyRate, self.dic_cTransferRate, self.dic_item[k[1]][0], k)
+                
+                self.uiucCombine(self.dic_uiBehaviorCount, self.dic_uiCartNotBuy, k, k[0], k[1])
+                self.uiucCombine(self.dic_ucBehaviorCount, self.dic_ucCartNotBuy, k, k[0], self.dic_item[k[1]][0])
+    
+    def writeFeatureFile(self):
+        if self.tag_date != self.pre_date:
+            flag = 'train'
+        else:
+            flag = 'pre'
+        if not os.path.isdir(self.output_dir + flag + os.sep):
+            os.mkdir(self.output_dir + flag + os.sep)
+        featureWriter = csv.writer(file(self.output_dir + flag + os.sep + self.tag_date + '.csv', 'wb'))
+        for (k, v) in self.dic_allfeatures.items():
+            if flag == 'train':
+                line = [self.dic_train[k]]
+            else:
+                line = []
+            line.extend(k)
+            line.extend(self.dic_allfeatures[k])
+            featureWriter.writerow(line)
+
 # test
-a = extractFeaturesNTags('ori_data/', 'split_data/', 'features/', '2014-12-01', '2014-12-19', 3)
+a = extractFeaturesNTags('ori_data/', 'split_data/', 'features/', '2014-12-18', '2014-12-19', 3)
 a.getItemDict()
 a.firstReader()
 a.secondReader()
+if a.tag_date != a.pre_date:
+    a.lastDayReader()
+a.combineFeatures(a.dic_train)
+a.writeFeatureFile()
 print len(a.dic_uBehaviorCount)
 print len(a.dic_uRebuyRate)
 print len(a.dic_uTransferRate)
 print len(a.dic_uiBehaviorCount)
 print len(a.dic_uiCartNotBuy)
+print len(a.dic_train)
+print len(a.dic_allfeatures)
+for (k, v) in a.dic_allfeatures.items():
+    print len(v)
+    break
