@@ -7,7 +7,7 @@ import readMultiCSVFile as rmf
 
 class extractFeaturesNTags(object):
 
-    def __init__(self, ori_dir, split_dir, output_dir, tag_date, pre_date, time_window):
+    def __init__(self, ori_dir, split_dir, output_dir, tag_date, pre_date, time_window, item_sub):
         self.ori_dir = ori_dir   # ori_data/
         self.split_dir = split_dir   # split_data/
         output_path = output_dir + 'pre' + pre_date.split('-')[-1] + os.sep   # features/(pre1219/)
@@ -17,12 +17,16 @@ class extractFeaturesNTags(object):
         self.tag_date = tag_date
         self.pre_date = pre_date
         self.time_window = time_window
+        self.item_sub = item_sub
 
         self.windowReader = rmf.readMultiCSVFile(split_dir, tag_date, '%Y-%m-%d', time_window)
         
-        ## item and cat dict of subset
-        self.dic_item = {}   # {itemid:[cat, geo]}
+        ## item and cat dict
+        self.dic_item = {}   # {itemid:cat}
         self.dic_cat = {} # {cat:1}
+
+        self.dic_subitem = {}
+        self.dic_subcat = {}
 
         ## feature dict
         self.dic_uBehaviorCount = {}   # {id:[[1,2,3,4], [], []]}
@@ -61,6 +65,9 @@ class extractFeaturesNTags(object):
         ## u-i couple dict
         self.dic_train = {}   # {(uid,iid):1 or 0}
         self.dic_pre = {}
+        self.dic_buy = {}
+
+        self.pos_count = 0
 
 
     
@@ -68,16 +75,27 @@ class extractFeaturesNTags(object):
         '''Load the item file into a dict'''
         item_reader = csv.reader(file(self.ori_dir + 'tianchi_mobile_recommend_train_item.csv', 'r'))
         for line in item_reader:
-            if line[0] not in self.dic_item:
-                self.dic_item[line[0]] = [line[2], line[1]]
-            if line[2] not in self.dic_cat:
-                self.dic_cat[line[2]] = 1
+            if line[0] not in self.dic_subitem:
+                self.dic_subitem[line[0]] = line[2]
+            if line[2] not in self.dic_subcat:
+                self.dic_subcat[line[2]] = 1
+               
+        if self.item_sub == 1:
+            self.dic_item = self.dic_subitem
+            self.dic_cat = self.dic_subcat
+        else:
+            item_reader = csv.reader(file(self.ori_dir + 'tianchi_mobile_recommend_train_user.csv', 'r'))
+            for line in item_reader:
+                if line[1] not in self.dic_item:
+                    self.dic_item[line[1]] = line[4]
+                if line[4] not in self.dic_cat:
+                    self.dic_cat[line[4]] = 1
         
     
     ## behavior count for each day
     def behaviorCountJudge(self, key, day, behavior, dic):
 	if key not in dic:
-	    dic[key] = [[0,0,0,0],[0,0,0,0],[0,0,0,0]]
+            dic[key] = [[0,0,0,0]] * self.time_window
         dic[key][day][int(behavior) - 1] += 1
 	
     def uicBehaviorCount(self, userid, itemid, catid, behavior, day):
@@ -133,9 +151,9 @@ class extractFeaturesNTags(object):
                 self.dic_uiBehaviorCount[(userid, itemid)] = [0,0,0,0]
             self.dic_uiBehaviorCount[(userid, itemid)][int(behavior) - 1] += 1
 
-            if (userid, self.dic_item[itemid][0]) not in self.dic_ucBehaviorCount:
-                self.dic_ucBehaviorCount[(userid, self.dic_item[itemid][0])] = [0,0,0,0]
-            self.dic_ucBehaviorCount[(userid, self.dic_item[itemid][0])][int(behavior) - 1] += 1
+            if (userid, self.dic_item[itemid]) not in self.dic_ucBehaviorCount:
+                self.dic_ucBehaviorCount[(userid, self.dic_item[itemid])] = [0,0,0,0]
+            self.dic_ucBehaviorCount[(userid, self.dic_item[itemid])][int(behavior) - 1] += 1
 
 
     ## transfer rate
@@ -155,11 +173,11 @@ class extractFeaturesNTags(object):
             self.uiTransferTemp(k[0], v, self.dic_ut_temp)
             self.uiTransferTemp(k[1], v, self.dic_it_temp)
         for (k, v) in self.dic_it_temp.items():
-            if self.dic_item[k][0] not in self.dic_ct_temp:
-                self.dic_ct_temp[self.dic_item[k][0]] = [[0,0],[0,0],[0,0]]
+            if self.dic_item[k] not in self.dic_ct_temp:
+                self.dic_ct_temp[self.dic_item[k]] = [[0,0],[0,0],[0,0]]
             for i in range(3):
                 for j in range(2):
-                    self.dic_ct_temp[self.dic_item[k][0]][i][j] += v[i][j]
+                    self.dic_ct_temp[self.dic_item[k]][i][j] += v[i][j]
 
     def calculateTrRate(self, dic_temp, dic_rate):
         for (k, v) in dic_temp.items():
@@ -183,31 +201,48 @@ class extractFeaturesNTags(object):
         '''judge if the u-i/u-c was put in cart and has not been bought in the time window for each day'''
         if itemid in self.dic_item and behavior == '3' and self.dic_uiBehaviorCount[(userid, itemid)][3] == 0:
             if (userid, itemid) not in self.dic_uiCartNotBuy:
-                self.dic_uiCartNotBuy[(userid, itemid)] = [0,0,0]
+                self.dic_uiCartNotBuy[(userid, itemid)] = [0] * self.time_window
             self.dic_uiCartNotBuy[(userid, itemid)][day] = 1
         if itemid in self.dic_item and behavior == '3' and self.dic_ucBehaviorCount[(userid, catid)][3] == 0:
             if (userid, catid) not in self.dic_ucCartNotBuy:
-                self.dic_ucCartNotBuy[(userid, catid)] = [0,0,0]
+                self.dic_ucCartNotBuy[(userid, catid)] = [0] * self.time_window
             self.dic_ucCartNotBuy[(userid, catid)][day] = 1
             
     
     ## extract tag data
-    def extractTrainUi(self, userid, itemid, behavior):
-        if itemid in self.dic_item:
-            if (userid, itemid) not in self.dic_train:
-                if behavior == '4':
-                    self.dic_train[(userid, itemid)] = 1
-                else:
-                    self.dic_train[(userid, itemid)] = 0
-            else:
-                if behavior == '4':
-                    self.dic_train[(userid, itemid)] = 1
+#     def extractTrainUi(self, userid, itemid, behavior):
+#         if itemid in self.dic_item:
+#             if (userid, itemid) not in self.dic_train:
+#                 if behavior == '4':
+#                     self.dic_train[(userid, itemid)] = 1
+#                 else:
+#                     self.dic_train[(userid, itemid)] = 0
+#             else:
+#                 if behavior == '4':
+#                     self.dic_train[(userid, itemid)] = 1
+#
+#     def extractPreUi(self, userid, itemid, behavior):
+#         if itemid in self.dic_item:
+#             if (userid, itemid) not in self.dic_pre:
+#                 self.dic_pre[(userid, itemid)] = ''
 
-    def extractPreUi(self, userid, itemid, behavior):
-        if itemid in self.dic_item:
-            if (userid, itemid) not in self.dic_pre:
+    def extractPreUi(self, userid, itemid, behavior, itemdic):
+        if itemid in itemdic:
+            if behavior == '3' and (userid, itemid) not in self.dic_pre:
                 self.dic_pre[(userid, itemid)] = ''
-         
+
+    def extractBuyUi(self, userid, itemid, behavior):
+        if itemid in self.dic_item:
+            if behavior == '4' and (userid, itemid) not in self.dic_buy:
+                self.dic_buy[(userid, itemid)] = 1
+
+    def extractTrainUi(self):
+        for key in self.dic_pre:
+            if key in self.dic_buy:
+                self.dic_train[key] = 1
+                self.pos_count += 1
+            else:
+                self.dic_train[key] = 0
 
     def firstReader(self):
         csv_feature_reader_list = self.windowReader._readFeatureSet()
@@ -223,8 +258,11 @@ class extractFeaturesNTags(object):
                 self.uicBehaviorCount(userid, itemid, catid, behavior, day)
                 self.uicRebuyCount(userid, itemid, catid, behavior)
                 self.uiucBehaviorCount(userid, itemid, catid, behavior)
-                if self.tag_date == self.pre_date:
-                    self.extractPreUi(userid, itemid, behavior)
+                if day == self.time_window - 1:
+                    if self.pre_date == self.tag_date:
+                        self.extractPreUi(userid, itemid, behavior, self.dic_subitem)
+                    else:
+                        self.extractPreUi(userid, itemid, behavior, self.dic_item)
         self.uicRebuyRate()
         self.uicTransferCount()
         self.uicTransferRate()
@@ -238,7 +276,8 @@ class extractFeaturesNTags(object):
     def lastDayReader(self):
         csv_last_reader = self.windowReader._readTagSet()
         for line in csv_last_reader:
-            self.extractTrainUi(line[0], line[1], line[2])
+            self.extractBuyUi(line[0], line[1], line[2])
+        self.extractTrainUi()
 
     ## combine features
     def uicCombine(self, dic_behaviorCount, dic_rebuyRate, dic_transferRate, key, uikey):
@@ -264,7 +303,7 @@ class extractFeaturesNTags(object):
         if (key1, key2) in dic_cartNotBuy:
             self.dic_allfeatures[k].extend(dic_cartNotBuy[(key1, key2)])
         else:
-            self.dic_allfeatures[k].extend([0,0,0])
+            self.dic_allfeatures[k].extend([0] * self.time_window)
 
     def combineFeatures(self, dic_UI):
         for (k, v) in dic_UI.items():
@@ -273,10 +312,10 @@ class extractFeaturesNTags(object):
                 
                 self.uicCombine(self.dic_uBehaviorCount, self.dic_uRebuyRate, self.dic_uTransferRate, k[0], k)
                 self.uicCombine(self.dic_iBehaviorCount, self.dic_iRebuyRate, self.dic_iTransferRate, k[1], k)
-                self.uicCombine(self.dic_cBehaviorCount, self.dic_cRebuyRate, self.dic_cTransferRate, self.dic_item[k[1]][0], k)
+                self.uicCombine(self.dic_cBehaviorCount, self.dic_cRebuyRate, self.dic_cTransferRate, self.dic_item[k[1]], k)
                 
                 self.uiucCombine(self.dic_uiBehaviorCount, self.dic_uiCartNotBuy, k, k[0], k[1])
-                self.uiucCombine(self.dic_ucBehaviorCount, self.dic_ucCartNotBuy, k, k[0], self.dic_item[k[1]][0])
+                self.uiucCombine(self.dic_ucBehaviorCount, self.dic_ucCartNotBuy, k, k[0], self.dic_item[k[1]])
 
 
     ## nomalize
@@ -328,7 +367,7 @@ class extractFeaturesNTags(object):
         self.writeFeatureFile()
 
 # test
-a = extractFeaturesNTags('ori_data/', 'split_data/', 'features/', '2014-12-18', '2014-12-19', 3)
+a = extractFeaturesNTags('ori_data/', 'split_data/', 'features/', '2014-12-18', '2014-12-19', 5, 0)
 a._prepareFeatures()
 print len(a.dic_uBehaviorCount)
 print len(a.dic_uRebuyRate)
@@ -337,6 +376,7 @@ print len(a.dic_uiBehaviorCount)
 print len(a.dic_uiCartNotBuy)
 print len(a.dic_train)
 print len(a.dic_allfeatures)
+print a.pos_count
 for (k, v) in a.dic_allfeatures.items():
     print len(v)
     break
