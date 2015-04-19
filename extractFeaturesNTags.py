@@ -366,17 +366,38 @@ class extractFeaturesNTags(object):
         self.nomalize()
         self.writeFeatureFile()
 
+    def _writePreset(self):
+        if self.tag_date != self.pre_date:
+            print self.tag_date + ' is not the pre date. No pre set will be written.'
+        else:
+            self.getItemDict()
+            csv_feature_reader_list = self.windowReader._readFeatureSet()
+            for day in range(self.time_window):
+                if day == self.time_window - 1:
+                    for line in csv_feature_reader_list[day]:
+                        userid = line[0]
+                        itemid = line[1]
+                        behavior = line[2]
+                        self.extractPreUi(userid, itemid, behavior, self.dic_subitem)
+        
+            preWriter = csv.writer(file(self.pre_date + '-pre.csv', 'wb'))
+            for k in self.dic_pre:
+                preWriter.writerow(k)
+            preWriter
+
 # test
-a = extractFeaturesNTags('ori_data/', 'split_data/', 'features/', '2014-12-18', '2014-12-19', 5, 0)
-a._prepareFeatures()
-print len(a.dic_uBehaviorCount)
-print len(a.dic_uRebuyRate)
-print len(a.dic_uTransferRate)
-print len(a.dic_uiBehaviorCount)
-print len(a.dic_uiCartNotBuy)
-print len(a.dic_train)
-print len(a.dic_allfeatures)
-print a.pos_count
-for (k, v) in a.dic_allfeatures.items():
-    print len(v)
-    break
+if __name__ == '__main__':
+    a = extractFeaturesNTags('ori_data/', 'split_data/', 'features/', '2014-12-19', '2014-12-19', 3, 0)
+    a._writePreset()
+#     a._prepareFeatures()
+#     print len(a.dic_uBehaviorCount)
+#     print len(a.dic_uRebuyRate)
+#     print len(a.dic_uTransferRate)
+#     print len(a.dic_uiBehaviorCount)
+#     print len(a.dic_uiCartNotBuy)
+#     print len(a.dic_train)
+#     print len(a.dic_allfeatures)
+#     print a.pos_count
+#     for (k, v) in a.dic_allfeatures.items():
+#         print len(v)
+#         break
